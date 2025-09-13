@@ -3,6 +3,7 @@
 
 #include <QMainWindow>
 #include <QProcess>
+#include <QSettings>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -20,6 +21,13 @@ public:
 
     QStringList splitLines(const QString &text);
     QStringList splitCheckFilters(const QString &text);
+
+    void appendLogColor(const QString &info);
+    void appendLog(const QString &info);
+
+    void backupPaths(const QStringList &paths);
+protected:
+    void closeEvent(QCloseEvent *event) override;
 
 private slots:
     void on_pushButtonFile_clicked();
@@ -54,8 +62,15 @@ private slots:
     void on_pushButtonClear_clicked();
 
 
+    void on_pushButtonBackFolder_clicked();
+
+    void on_pushButtonBackClear_clicked();
+
+    void on_checkBoxBack_stateChanged(int arg1);
+
 private:
     Ui::MainWindow *ui;
     QProcess *m_encoderProcess = nullptr;
+    QSettings *m_settings = nullptr;
 };
 #endif // MAINWINDOW_H

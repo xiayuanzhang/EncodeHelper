@@ -6,42 +6,6 @@ import tempfile
 import shutil
 
 
-def detect_file_encoding(file_path, threshold: float = 0.0):
-    """
-    使用 charset-normalizer 检测文件编码，并打印所有候选结果。
-
-    :param file_path: 文件路径
-    :param threshold: 置信度阈值，低于此值则返回 None
-    :return: (encoding, confidence) 或 (None, 0.0)
-    """
-    if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        print(f"[错误] {file_path} 不存在或不是文件")
-        return None, 0.0
-
-    try:
-        with open(file_path, "rb") as f:
-            raw_data = f.read()
-
-        results = from_bytes(raw_data)
-
-        if not results:
-            print("[提示] 未检测到任何编码候选")
-            return None, 0.0
-
-        print(f"[候选编码结果] {file_path}:")
-        for match in results:
-            print(f"  - {match.encoding:<15} 置信度={match.fingerprint:.2f} 语言={match.language}")
-
-        best = results.best()
-        if best and best.fingerprint > 0.0 and best.fingerprint >= threshold:
-            return best.encoding, best.fingerprint
-        else:
-            print("[提示] 检测到的编码置信度过低")
-            return None, 0.0
-
-    except Exception as e:
-        print(f"[错误] {file_path}: {e}")
-        return None, 0.0
 
 def process_file(file_path, target_encoding="utf-8"):
     """
@@ -52,29 +16,27 @@ def process_file(file_path, target_encoding="utf-8"):
     :return: (转换结果, 错误原因)
     """
     if not os.path.exists(file_path):
-        return False, f"{file_path}: 文件不存在"
+        return False, f"[错误] {file_path}: 文件不存在"
 
     if not os.path.isfile(file_path):
-        return False, f"{file_path}: 路径不是一个文件"
+        return False, f"[错误] {file_path}: 路径不是一个文件"
 
-    source_encoding = ""
     try:
-        # 检测文件编码
+        # 自动检测编码
         with open(file_path, "rb") as file:
             raw_data = file.read()
             detected = charset_normalizer.detect(raw_data)
             source_encoding = detected.get("encoding")
-            print(source_encoding)
 
         if not source_encoding:
-            return False, f"{file_path}: 无法检测文件编码"
+            return False, f"[错误] {file_path}: 无法检测文件编码"
 
         # 使用检测到的编码读取文件内容
         try:
             with open(file_path, "r", encoding=source_encoding) as file:
                 content = file.read()
         except UnicodeDecodeError:
-            return False, f"{file_path}: 无法使用检测到的编码 {source_encoding} 解码文件"
+            return False, f"[错误] {file_path}: 无法使用检测到的编码 {source_encoding} 解码文件"
 
         # 写入到临时文件，再覆盖原文件
         dir_name = os.path.dirname(file_path)
@@ -83,17 +45,14 @@ def process_file(file_path, target_encoding="utf-8"):
             temp_file_path = tmp_file.name
 
         shutil.move(temp_file_path, file_path)  # 原子替换
-
-        return True, ""
+        return True, f"[信息] {file_path}: {source_encoding} -> {target_encoding}"
 
     except FileNotFoundError:
-        return False, f"{file_path}: 文件未找到"
+        return False, f"[错误] {file_path}: 文件未找到"
     except PermissionError:
-        return False, f"{file_path}: 没有权限访问文件"
-    except UnicodeDecodeError:
-            return False, f"{file_path}: 无法检测dao 文件编码"
+        return False, f"[错误] {file_path}: 没有权限访问文件"
     except Exception as e:
-        return False, f"{file_path}: 未知错误: {str(e)}"
+        return False, f"[错误] {file_path}: 未知错误: {str(e)}"
 
 def main():
     while True:
@@ -120,15 +79,10 @@ def main():
                         success_count += 1
                     else:
                         failure_count += 1
+                    if reason:
                         error_reasons.append(reason)
                 error_reasons_str = ','.join(error_reasons)
                 output = f"change_return,{success_count},{failure_count},{error_reasons_str}\n"
-                sys.stdout.write(output)
-                sys.stdout.flush()
-            if command == "test":
-                file_path = parts[1]
-                content = detect_file_encoding(file_path)
-                output = f"test_return,{content}\n"
                 sys.stdout.write(output)
                 sys.stdout.flush()
             else:

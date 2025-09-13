@@ -3,6 +3,9 @@
 #include <QFileDialog>
 #include "qencoder.h"
 #include <QDateTime>
+#include <QCloseEvent>
+#include <QDesktopServices>
+
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -10,7 +13,29 @@ MainWindow::MainWindow(QWidget *parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
+    m_settings = new QSettings("config.ini", QSettings::IniFormat, this);
+    if(!m_settings->contains("init")){
+        m_settings->setValue("init", "0");
+        m_settings->setValue("encode", "utf-8");
+        m_settings->setValue("filter", "*.cpp\r\n*.h\r\n*.hpp\r\n*.c\r\n*.cc\r\n*.hh\r\n*.cxx\r\n*.hxx");
+        m_settings->setValue("paths", "");
+        m_settings->setValue("normalEncode","utf-8,utf-16,utf-16-be,utf-32,utf-32-le,"
+                                             "utf-32-be,ascii,gbk,gb2312,gb18030");
+        m_settings->setValue("backup","true");
+        m_settings->sync();
+    }
+
     ui->comboBoxEncode->addItems(QEncoder::getAllEncodings());
+    ui->comboBoxEncode->setCurrentText(m_settings->value("encode","utf-8").toString());
+    ui->textEditFilter->setPlainText(m_settings->value("filter","*.cpp\r\n*.h\r\n*.hpp\r\n*.c\r\n*.cc\r\n*.hh\r\n*.cxx\r\n*.hxx").toString());
+    ui->textEditSrc->setPlainText(m_settings->value("paths","").toString());
+    QStringList filters = splitCheckFilters(ui->textEditFilter->toPlainText());
+    ui->checkBoxCpp->setChecked(filters.contains("*.cpp") || filters.contains("*.cxx") || filters.contains("*.cc"));
+    ui->checkBoxHpp->setChecked(filters.contains("*.hpp") || filters.contains("*.hxx") || filters.contains("*.hh"));
+    ui->checkBoxC->setChecked(filters.contains("*.c"));
+    ui->checkBoxH->setChecked(filters.contains("*.h"));
+    ui->checkBoxBack->setChecked(m_settings->value("backup","true").toString() == "true");
+
 
     ui->textEditPreview->setReadOnly(true);
     ui->textEditOutput->setReadOnly(true);
@@ -36,9 +61,9 @@ MainWindow::MainWindow(QWidget *parent)
             int successCount = outputCmd.at(1).toInt();
             int failCount = outputCmd.at(2).toInt();
             for(int i = 3; i< outputCmd.size(); ++i){
-                ui->textEditOutput->append(outputCmd.at(i));
+                appendLogColor(outputCmd.at(i));
             }
-            ui->textEditOutput->append(QString("转换完成, 成功 %1 个, 失败 %2 个").arg(successCount).arg(failCount));
+            appendLogColor(QString("转换完成, 成功 %1 个, 失败 %2 个").arg(successCount).arg(failCount));
         }
     });
 
@@ -53,6 +78,7 @@ MainWindow::MainWindow(QWidget *parent)
         //                           .arg(exitCode)
         //                           .arg(exitStatus == QProcess::NormalExit ? "正常退出" : "异常退出"));
     });
+
 }
 
 MainWindow::~MainWindow()
@@ -83,25 +109,157 @@ QStringList MainWindow::splitCheckFilters(const QString &text)
     return filters;
 }
 
+void MainWindow::appendLogColor(const QString &info)
+{
+    QStringList normalEmcode = m_settings->value("normalEncode","utf-8").toString().split(",", Qt::SkipEmptyParts);
+    QStringList unusualncode = QEncoder::getAllEncodings();
+    for (const QString &s : normalEmcode) {
+        unusualncode.removeAll(s);
+    }
+
+    if(info.contains("错误")){//红色显示
+        ui->textEditOutput->setTextColor(Qt::red);
+    }else if(info.contains("警告")){//橙色显示
+        ui->textEditOutput->setTextColor(QColor(255, 140, 0));
+    }else{//黑色显示
+        //ui->textEditOutput->setTextColor(Qt::black);
+        //非常见编码格式, 橙色显示
+        bool unusualFound = false;
+        for (const QString &k : unusualncode) {
+            if (info.contains(k, Qt::CaseInsensitive)) {
+                unusualFound = true;
+                break;
+            }
+        }
+        if(unusualFound){
+            ui->textEditOutput->setTextColor(QColor(255, 140, 0));
+        }else{
+            ui->textEditOutput->setTextColor(Qt::black);
+        }
+    }
+    ui->textEditOutput->append(info);
+}
+
+void MainWindow::appendLog(const QString &info)
+{
+    ui->textEditOutput->append(info);
+}
+
+// 递归复制文件夹
+void copyDir(const QString &srcPath, const QString &dstPath)
+{
+    QDir srcDir(srcPath);
+    if (!srcDir.exists())
+        return;
+
+    QDir dstDir(dstPath);
+    if (!dstDir.exists())
+        dstDir.mkpath(".");
+
+    QFileInfoList entries = srcDir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
+    for (const QFileInfo &entry : entries) {
+        QString srcFilePath = entry.absoluteFilePath();
+        QString dstFilePath = dstPath + "/" + entry.fileName();
+
+        if (entry.isDir()) {
+            copyDir(srcFilePath, dstFilePath);
+        } else {
+            QFile::copy(srcFilePath, dstFilePath);
+        }
+    }
+}
+
+void MainWindow::backupPaths(const QStringList &paths)
+{
+    QString exeDir = QCoreApplication::applicationDirPath();  // exe 所在目录
+    QDir backupRoot(exeDir + "/backup");
+    if (!backupRoot.exists()) {
+        backupRoot.mkpath(".");
+    }
+
+    for (const QString &path : paths) {
+        QFileInfo info(path);
+
+        // 把路径中的 ":" 和 "/"、"\" 替换成 "_"
+        QString normalizedPath = info.absolutePath();
+        normalizedPath.replace(":", "_");
+        normalizedPath.replace("\\", "_");
+        normalizedPath.replace("/", "_");
+
+        if (info.isFile()) {
+            // 文件 -> backup/files/<盘符_路径>/filename
+            QDir filesBackupDir(backupRoot.filePath("files/" + normalizedPath));
+            if (!filesBackupDir.exists()) {
+                filesBackupDir.mkpath(".");
+            }
+
+            QString dstFile = filesBackupDir.filePath(info.fileName());
+            if (!QFile::copy(info.absoluteFilePath(), dstFile)) {
+                qDebug() << "文件复制失败:" << info.absoluteFilePath();
+            } else {
+                qDebug() << "文件备份:" << info.absoluteFilePath() << "->" << dstFile;
+            }
+
+        } else if (info.isDir()) {
+            // 文件夹 -> backup/<盘符_路径>/<目录名/...>
+            QString dstFolder = backupRoot.filePath(normalizedPath);
+            QDir().mkpath(dstFolder);
+
+            QString finalDst = dstFolder + "/" + info.fileName();
+            copyDir(info.absoluteFilePath(), finalDst);
+
+            qDebug() << "文件夹备份:" << info.absoluteFilePath() << "->" << finalDst;
+        }
+    }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    m_settings->setValue("encode", ui->comboBoxEncode->currentText());
+    m_settings->setValue("filter", ui->textEditFilter->toPlainText());
+    m_settings->setValue("paths", ui->textEditSrc->toPlainText());
+    m_settings->setValue("backup", ui->checkBoxBack->isChecked() ? "true" : "false");
+    m_settings->sync();
+    // if (m_encoderProcess) {
+    //     m_encoderProcess->write("exit\n");
+    //     m_encoderProcess->waitForFinished(3000); // 等待最多3秒
+    //     if (m_encoderProcess->state() != QProcess::NotRunning) {
+    //         m_encoderProcess->kill(); // 强制终止
+    //     }
+    // }
+    event->accept();
+}
+
 void MainWindow::on_pushButtonFile_clicked()
 {
     //打开文件选择对话框,可多选, 任意类型
-    QStringList fileNames = QFileDialog::getOpenFileNames(this, "选择文件", "", "All Files (*.*)");
+    QString startDir = m_settings->value("lastChoseFile", "").toString();
+    QStringList fileNames = QFileDialog::getOpenFileNames(this, "选择文件", startDir, "All Files (*.*)");
     if (!fileNames.isEmpty()) {
         for (const auto &fileName : fileNames) {
             ui->textEditSrc->append(fileName);
         }
+
+        // 更新 lastDir
+        QFileInfo fi(fileNames.first());
+        m_settings->setValue("lastChoseFile", fi.absolutePath());
     }
 }
 
 
 void MainWindow::on_pushButtonFolder_clicked()
 {
+    QString startDir = m_settings->value("lastChoseFDir", "").toString();
     //打开文件夹选择对话框
-    QString dir = QFileDialog::getExistingDirectory(this, "选择文件夹", "");
+    QString dir = QFileDialog::getExistingDirectory(this, "选择文件夹", startDir);
     if (!dir.isEmpty()) {
         ui->textEditSrc->append(dir);
+
+        // 更新 lastDir
+        m_settings->setValue("lastChoseFDir", dir);
     }
+
+
 }
 
 
@@ -211,6 +369,11 @@ void MainWindow::on_pushButtonOk_clicked()
         }
         return;
     }
+    if(ui->checkBoxBack->isChecked()){
+        backupPaths(paths);
+    }
+
+
     QStringList files = QEncoder::collectFilesByFilters(paths, filters);
     ui->textEditPreview->setPlainText(files.join("\n"));
 
@@ -280,4 +443,34 @@ void MainWindow::on_pushButtonClear_clicked()
 
 
 
+
+
+
+
+void MainWindow::on_pushButtonBackFolder_clicked()
+{
+    //使用资源管理器打开 ./backup 文件夹
+    QString backupDir = QCoreApplication::applicationDirPath() + "/backup";
+    QDesktopServices::openUrl(QUrl::fromLocalFile(backupDir));
+
+}
+
+
+void MainWindow::on_pushButtonBackClear_clicked()
+{
+    //将backup移动到资源管理器回收站,重新创建backup文件夹
+    QString backupDir = QCoreApplication::applicationDirPath() + "/backup";
+    QDir dir(backupDir);
+    if(dir.exists()){
+        dir.removeRecursively();
+    }
+    dir.mkpath(backupDir);
+    ui->textEditOutput->append("备份文件夹已清空");
+}
+
+
+void MainWindow::on_checkBoxBack_stateChanged(int arg1)
+{
+
+}
 
