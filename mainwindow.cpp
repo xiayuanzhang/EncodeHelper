@@ -195,9 +195,9 @@ void MainWindow::backupPaths(const QStringList &paths)
 
             QString dstFile = filesBackupDir.filePath(info.fileName());
             if (!QFile::copy(info.absoluteFilePath(), dstFile)) {
-                qDebug() << "文件复制失败:" << info.absoluteFilePath();
+                appendLog("文件复制失败:" + info.absoluteFilePath());
             } else {
-                qDebug() << "文件备份:" << info.absoluteFilePath() << "->" << dstFile;
+                appendLog("文件备份成功:" + info.absoluteFilePath() + " -> " + dstFile);
             }
 
         } else if (info.isDir()) {
@@ -207,8 +207,7 @@ void MainWindow::backupPaths(const QStringList &paths)
 
             QString finalDst = dstFolder + "/" + info.fileName();
             copyDir(info.absoluteFilePath(), finalDst);
-
-            qDebug() << "文件夹备份:" << info.absoluteFilePath() << "->" << finalDst;
+            appendLog("文件夹备份成功:" + info.absoluteFilePath() + " -> " + finalDst);
         }
     }
 }
@@ -359,6 +358,12 @@ void MainWindow::on_pushButtonOk_clicked()
 {
     //输出时间
     ui->textEditOutput->append(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+    if(m_encoderProcess->state() != QProcess::Running){
+        ui->textEditOutput->append("编码进程未运行, 停止工作");
+        return;
+    }
+    qDebug() << "编码进程ID:" << m_encoderProcess->processId();
+
 
     QStringList paths = splitLines(ui->textEditSrc->toPlainText());
     QStringList filters = splitCheckFilters(ui->textEditFilter->toPlainText());

@@ -42,6 +42,18 @@ install(TARGETS EncodeHelper
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 
+
+# 安装 encoder.exe
+install(FILES ${CMAKE_SOURCE_DIR}/dist/encoder.exe
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# set(QT_DEPLOY_LIBS
+#     Qt6Core
+#     Qt6Gui
+#     Qt6Widgets
+# )
+
 qt_generate_deploy_app_script(
     TARGET EncodeHelper
     OUTPUT_SCRIPT deploy_script
